@@ -1,0 +1,203 @@
+---
+title: "Sensemaking Simulation 9b: Pruning irrelevant causal nodes."
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+
+```{r}
+source("definitions.R")
+
+
+if(exists("seed"))
+{
+    seed <- seed + 1
+} else {
+    seed <- 100
+}
+#seed <- 136
+cat("Using random seed: ",seed,"\n")
+set.seed(seed)
+
+test <- 9
+
+```
+## About
+
+This is a version of simulation 9 that replaces the inner learning cycles with a call to function pureLearn()
+
+## Setup
+
+To set up an environment, you need:
+
+1. To specify nodes
+2. To specify connections between nodes (aweights)
+3. To specify values of nodes (avals)
+4. to specify input, output, and 'visible' nodes.
+5. Specify initial hypothesis space (hvals/hweights/hframe,houtput)
+
+
+```{r}
+
+  ##input nodes and 1 output node.
+  ## there are only 6 relevant nodes, the rest are garbage.
+  ##test 8 is the random contrast condition for the same set-up
+  ##test 9 is a crafted constrast condition.
+  
+  numnodes<- 20
+  
+  ##learn from.
+  
+  avals <- runif(numnodes)
+  ##each row represents the outgoing connections from each node
+  aweights <-array( matrix(rep(0,numnodes^2),numnodes),
+    dim=list(numnodes,numnodes,1))
+  aweights[,numnodes,1] <- c(-10,-5,-1,rep(0,numnodes-7),1,5,10,0)
+  input <- c(rep(T,numnodes-1),F)
+  output <- !input
+  visible <- rep(T,numnodes)
+  
+coord <-    plotMM(aweights[,,1],aweights[,,1],input,output) ##take 
+  
+```
+
+
+
+# Generate the data:
+
+```{r}
+
+data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input,noise=noise)
+
+```
+
+
+## The main simulation/learning phase.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#set.seed(as.numeric(Sys.time()))
+printme <- FALSE
+numexemplars <- 10      ##how many exemplars
+exemplarsToUpdate <- 5
+simreps <- 400
+trial <- 1
+
+stmSize <- 5
+stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
+
+##implement learning here.
+alpha <- .25 #learning rate.
+decay <- .9995
+maxback <- 10  #how deeply to simulate causal model/back-propogate.
+
+
+reframecycle <- 50 ##how often to engage in 'reframing'
+
+
+  ##start at complete random weights.
+  hframe <- matrix(rep(0,numnodes^2),numnodes)
+  hframe[1:(numnodes-1),numnodes] <- 1#
+  #hframe <- generateRandomMentalModel(5,input,output)#
+ # hframe <- aweights[,,1]!=0 ##pick out the correct mental model:
+  hframe[4:10,numnodes] <- 0  ##get rid of irrelevant nodes immediately.
+  diag(hframe) <- 0
+
+  houtput <- output#!rowSums(hframe!=0)
+  
+
+
+##now, set up the ensemble of hypothesezs about the frame.
+hweights <- array(rep(hframe,numexemplars)* (1-2*runif(numnodes^2*numexemplars)),dim=list(numnodes,numnodes,numexemplars))
+
+##estimate mean error of model throughout, for each node.
+meanerror <- matrix(0,nrow=numexemplars,ncol=nrow(hframe))
+
+ord <- sample(nrow(data))
+##this repeats a random order  enough times to fill in simreps. Same order each time.
+simtrials <- rep(ord,ceiling(simreps/length(ord)))[sample(1:simreps)]
+learningerror <- array(NA,
+                       dim=list(exemplarsToUpdate,numnodes,simreps))
+trials <- ord
+counter <- 1
+
+
+  par(mfrow=c(1,3),mar=c(0,3,3,0))
+  ##Do the true world
+#  textcol <- c("black","white","white")[1+input + 2*output]
+  plotMM(aweights[,,1],aweights[,,1],input,output,coords=coord) ##take coordinates from earlier
+  title("Veridical Causal Model Structure",line=-1)
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  title("Mental model structure",line=-1)
+   
+  plotWeights(hweights,hframe,output,main=paste("Trial: 0"))
+
+
+prevdata <- data[1,]
+truth <- prevdata
+observed <- prevdata
+observed[houtput] <- NA
+
+## We iterate through simtrials in blocks.
+
+numblocks <- ceiling(simreps/reframecycle)
+
+trialsleft <- simreps+reframecycle
+trial <- 1
+
+for(block in 1:numblocks)
+{
+  print(paste("BLOCK",block))
+  trialsleft <- trialsleft-reframecycle
+  steps <-min(trialsleft,reframecycle)
+  tmpdata <-  data[simtrials[trial-1+(1:steps)],]
+  out <- pureLearn(steps=steps,hweights,hframe,alpha,
+                   exemplarsToUpdate,
+                   houtput, input,
+                   tmpdata,    stm)
+  
+  hweights <- out$hweights
+  stm <- out$stm
+  learningerror[,,(trial-1)+1:steps] <- out$learningerror
+  
+
+  ###Now, go through pruning/elaboration processes
+  ev <- evaluateMentalModel(stm,hweights,meanerror,
+                      observed,
+                      input,houtput,
+                      iter=10,noise=rep(0.01,numnodes),plot=F)
+
+  ##remove it from the frame.
+  hframe[ev$removeVar & !houtput] <- 0
+  ##zero out the weights:
+  hweights[,output,][ev$removeVar] <- 0
+
+  par(mfrow=c(1,3),mar=c(0,3,3,0))
+  ##Do the true world
+#  textcol <- c("black","white","white")[1+input + 2*output]
+  plotMM(aweights[,,1],aweights[,,1],input,output,coords=coord) ##take coordinates from earlier
+  title("Veridical Causal Model Structure",line=-1)
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  title("Mental model structure",line=-1)
+
+  plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
+
+  trial <- trial + steps
+}
+
+```
+
+
+```{R}
+par(mfrow=c(1,3),mar=c(3,4,2,0))
+image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+  plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
+
+ lerr <- apply(abs(learningerror),3, mean)
+ plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+```
+

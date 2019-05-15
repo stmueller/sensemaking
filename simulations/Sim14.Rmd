@@ -1,0 +1,327 @@
+---
+title: "Sensemaking Simulation 14: Weather Prediction Task"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_dir = "../sim-output")})
+output:
+  html_document:
+    df_print: paged
+---
+
+
+<link rel="stylesheet" href="http://vis.supstat.com/assets/themes/dinky/css/scianimator.css"> 
+
+```{r, error=F,messages=F,warning=F}
+library(animation)
+library(gifski)
+source("../src/definitions.R")
+
+
+if(exists("seed"))
+{
+    seed <- seed + 1
+} else {
+    seed <- 100
+}
+
+cat("Using random seed: ",seed,"\n")
+set.seed(seed)
+
+
+```
+## About
+
+This adapts model 13 to hnadle the WPT paradigm/data. There are four binary cues, each one with different
+cue validity toward predicting the outcome. We try this with two output nodes to ensure multiple 'output' nodes will work; previously only a single node has been explored.
+
+Also, this require a binary choice ultimately, which requires an argmax operator or something.
+
+
+## Setup
+
+
+
+```{r}
+
+
+  numnodes<- 6
+  
+  ##learn from.
+  
+  avals <- runif(numnodes)
+  ##each row represents the outgoing connections from each node
+  aweights <-array( matrix(rep(0,numnodes^2),numnodes),
+    dim=list(numnodes,numnodes,1))
+  aweights[,numnodes,1] <- c(0,-10,-5,  5, 10,0)
+  aweights[,1,1] <- - c(0,-10,-5,  5, 10,0)
+    input <- c(F,T,T,T,T,F)
+  output <- !input
+  visible <- rep(T,numnodes)
+  
+  coord <-    plotMM(aweights[,,1],aweights[,,1],input,output) ##take 
+  
+```
+
+
+
+# Generate the data:
+
+```{r}
+
+data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input,noise=noise)
+
+```
+
+
+
+
+## The main simulation/learning phase.
+##Use this for animation package:
+```{r,fig.width=8, fig.height=6, fig.show='animate', fig.path="../sim-output/img/"}
+##Use this one for non-animation
+#```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
+
+##Use this one for GIFSKI (requires installing RUST, etc.)
+##```{r, animation.hook='gifski',fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE, interval=.2}
+
+
+##Use this one for ffmpeg (requires installing RUST, etc.)
+#```{r, animation.hook='ffmpeg',ffmpeg.format='gif', dev='jpeg',      #fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE, interval=.2}
+
+oopt = ani.options(interval = 0.1,ani.res=200)
+#set.seed(as.numeric(Sys.time()))
+seed <- seed + 1
+cat("Using random seed: ",seed,"\n")
+set.seed(seed)
+printme <- FALSE
+numExemplars <- 10      ##how many exemplars
+exemplarsToUpdate <- 5
+simreps <- 1000
+trial <- 1
+
+stmSize <- 5
+stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
+
+fitthresh <- .7
+##implement learning here.
+alpha <- .1 #learning rate.
+decay <- .9995
+maxback <- 10  #how deeply to simulate causal model/back-propogate.
+
+##should reframing be done?
+doReframe <- FALSE
+startFull <- TRUE  ##should I start with a full frame or not? needs to be TRUE if doReframe is FALSE
+reframecycle <- 25 ##how often to engage in 'reframing'
+maxblockstosim <- 1000 ##this is just for debugging, so we can simulate fewer blocks but get 
+
+smgamma <- 5  ##softmax parameter for sampling from links not in the model.
+mentalsimburnin <- 50 ##how long to evaluate the mental simulation.
+
+  ##start at complete random weights.
+  hframe <- matrix(rep(0,numnodes^2),numnodes)
+  hframe[2:5,numnodes] <- 1
+  hframe[2:5,1] <- 1  
+  
+    diag(hframe) <- 0
+
+  houtput <- output#!rowSums(hframe!=0)
+  
+
+
+##now, set up the ensemble of hypothesezs about the frame.
+hweights <- array(rep(hframe,numExemplars)* (1-2*runif(numnodes^2*numExemplars)),dim=list(numnodes,numnodes,numExemplars))
+
+##estimate mean error of model throughout, for each node.
+meanerror <- matrix(0,nrow=numExemplars,ncol=nrow(hframe))
+
+ord <- sample(nrow(data))
+##this repeats a random order  enough times to fill in simreps. Same order each time.
+simtrials <- rep(ord,ceiling(simreps/length(ord)))[sample(1:simreps)]
+learningerror <- array(NA,
+                       dim=list(numExemplars,numnodes,simreps))
+trials <- ord
+counter <- 1
+
+
+  par(mfrow=c(2,2),mar=c(0,3,3,0))
+  ##Do the true world
+#  textcol <- c("black","white","white")[1+input + 2*output]
+  plotMM(aweights[,,1],aweights[,,1],input,output,coords=coord) ##take coordinates from earlier
+  title("Veridical Causal Model Structure",line=-1)
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  title("Mental model structure",line=-1)
+   
+  plotWeights(hweights,hframe,output,main=paste("Trial: 0"))
+
+
+prevdata <- data[1,]
+truth <- prevdata
+observed <- prevdata
+observed[houtput] <- NA
+
+## We iterate through simtrials in blocks.
+
+numblocks <- ceiling(simreps/reframecycle)
+
+trialsleft <- simreps+reframecycle
+trial <- 1
+ 
+for(block in 1:min(maxblockstosim,numblocks))
+{
+#  print(paste("BLOCK",block))
+  trialsleft <- trialsleft-reframecycle
+  steps <-min(trialsleft,reframecycle)
+  tmpdata <-  data[simtrials[trial-1+(1:steps)],]
+  
+ ##to be used later:   
+  hweights2 <- hweights
+  hweights3 <- hweights
+
+  out <- pureLearn(steps=steps,hweights,hframe,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   tmpdata,    stm)
+  
+  hweights <- out$hweights
+  stm <- out$stm
+  learningerror[,,(trial-1)+1:steps] <- out$learningerror
+  
+  
+    
+  learn1 <- pureLearn(steps=mentalsimburnin,hweights,hframe,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   stm,    stm)
+  
+  par(mfcol=c(2,3),mar=c(2,3,3,0))
+  plotWeights(learn1$hweights,hframe,output,main=paste("Original\nBlock:",block))
+
+if(doReframe)
+{
+  ###Now, go through pruning/elaboration processes
+  
+  
+  ##we need a way to search the space to generate new more elaborate hypotheses.
+  ##in general, this could involve looking at neighbors, 
+  ##looking at neighboring proper models,
+  ##getting instructions, etc.
+  
+  ##In all cases, this amounts to a contrast comparison, with counterfactual reasoning.
+  ## "what would my model look like if this were not the case?""
+  
+  ##test current model against stm:
+  ev <- evaluateMentalModel(stm,hweights,meanerror,
+                      observed,
+                      input,houtput,
+                      iter=10,noise=rep(0.01,numnodes),plot=F)
+
+  
+  ##select the nodes to remove now; so we don't add/remove the same node later.
+  remove <- ev$removeVar & !outer(houtput,houtput,"&")
+  
+  ###Adding phase: elaboration
+
+  ##IF we have all the nodes in there, there is no reason go thr
+  if(sum(hframe[,output])<sum(!output))
+  {
+  
+  ##On each step, pick one link that is not in the model, and test it out.
+  ##find correlation of each node with the output node, within STM:
+  predictors <-   abs(cor(stm)[,output] * (hframe[,output]==0))
+  predictors[output]<-0
+
+  probs <- predictors^smgamma/sum(predictors^smgamma)
+    ## Pick one node _probabilistically_ based on correlation with outcom. We could do a softmax here too.  
+  addnodes <- sample( (1:numnodes), prob=probs,size=1)
+  addnode <- addnodes[1]
+  
+  nodeAdded <- FALSE
+
+  ## Test against one with the missing piece
+  hframe2 <- hframe
+
+  hframe2[addnode,output] <- 1
+  hweights2[addnode,output,] <- rnorm(numExemplars)
+  
+
+  
+  learn2 <- pureLearn(steps=mentalsimburnin,hweights2,hframe2,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   stm,    stm)
+ 
+   ##this measures the error prediction after re-tuning; for the last 50 trials
+  fit1 <- sd(learn1$learningerror[,output,-50:0 + mentalsimburnin])
+  fit2 <- sd(learn2$learningerror[,output,-50:0 + mentalsimburnin])
+  
+  ##have we found a variable to add?
+  if(((fit2/fit1)< fitthresh) )
+  {
+    title(paste("Add node ",addnode))
+    print(paste("Adding node ",addnode))
+    
+    hframe<- hframe2
+    hweights <- learn2$hweights
+    
+    remove[addnode,output] <- F
+    nodeAdded <- TRUE
+
+  }
+  
+  plotWeights(learn2$hweights,hframe2,output,main=paste("Add ",addnode))
+  
+  
+
+  rng <- range((c(0,out$learningerror,learn2$learningerror)))
+  
+  matplot(t((learn1$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
+  abline(0,0)
+  grid()
+  matplot(t((learn2$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
+  abline(0,0)
+  grid()
+
+
+  barplot(c(fit1,fit2,fit2/fit1))
+  abline(1,0)
+  abline(fitthresh,0)
+
+   print(paste("Node:", addnode, "improvement",(fit2/fit1)))
+  
+  }
+  
+  ##remove any nodes recommended by evaluatemodel from the frame.
+  hframe[remove] <- 0
+
+  ##zero out the weights:
+  for(i in 1:numExemplars)
+    hweights[,,i][remove] <- 0
+
+}##end of reframe process
+  
+  
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  
+  trial <- trial + steps
+  
+}
+ani.options(oopt)
+```
+
+
+
+
+```{R}
+par(mfrow=c(2,2),mar=c(3,4,2,0))
+image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+  plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
+
+ lerr <- apply(abs(learningerror),3, mean)
+ plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+```
+
+

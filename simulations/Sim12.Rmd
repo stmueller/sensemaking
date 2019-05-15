@@ -1,0 +1,320 @@
+---
+title: "Sensemaking Simulation 12: Searching all neighbor missing nodes to add node"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+
+```{r}
+source("../src/definitions.R")
+
+
+if(exists("seed"))
+{
+    seed <- seed + 1
+} else {
+    seed <- 100
+}
+
+cat("Using random seed: ",seed,"\n")
+set.seed(seed)
+
+
+```
+## About
+This builds on model 11  by sampling a neighboring +1 model on each reconstruction round based on correlation with the outcome (in terms of the STM data). It stops if it finds a node to add based on 50% improvement fit. It also culls points using the sim9 model.
+
+Overall, the choices to add/remove are too haphazard in this model. It often finds a good node and the parameters converge to large values but the fit does not improve enough to warrant inclusion.
+
+## Setup
+
+To set up an environment, you need:
+
+1. To specify nodes
+2. To specify connections between nodes (aweights)
+3. To specify values of nodes (avals)
+4. to specify input, output, and 'visible' nodes.
+5. Specify initial hypothesis space (hvals/hweights/hframe,houtput)
+
+
+```{r}
+
+  ##input nodes and 1 output node.
+  ## there are only 6 relevant nodes, the rest are garbage.
+  ##test 8 is the random contrast condition for the same set-up
+  ##test 9 is a crafted constrast condition.
+  
+  numnodes<- 20
+  
+  ##learn from.
+  
+  avals <- runif(numnodes)
+  ##each row represents the outgoing connections from each node
+  aweights <-array( matrix(rep(0,numnodes^2),numnodes),
+    dim=list(numnodes,numnodes,1))
+  aweights[,numnodes,1] <- c(-10,-5,-1,rep(0,numnodes-7),1,5,10,0)
+  input <- c(rep(T,numnodes-1),F)
+  output <- !input
+  visible <- rep(T,numnodes)
+  
+coord <-    plotMM(aweights[,,1],aweights[,,1],input,output) ##take 
+  
+```
+
+
+
+# Generate the data:
+
+```{r}
+
+data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input,noise=noise)
+
+```
+
+
+
+
+## The main simulation/learning phase.
+
+```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
+
+#set.seed(as.numeric(Sys.time()))
+seed <- seed + 1
+
+cat("Using random seed: ",seed,"\n")
+set.seed(seed)
+printme <- FALSE
+numExemplars <- 10      ##how many exemplars
+exemplarsToUpdate <- 5
+simreps <- 1500
+trial <- 1
+
+stmSize <- 10
+stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
+
+fitthresh <- .7   ##How much better does a fit need to be to add a node?
+
+##implement learning here.
+alpha <- .25 #learning rate.
+decay <- .9995
+maxback <- 10  #how deeply to simulate causal model/back-propogate.
+
+
+reframecycle <- 50 ##how often to engage in 'reframing'
+maxblockstosim <- 1000 ##this is just for debugging, so we can simulate fewer blocks but get the same data.
+
+
+  ##start at complete random weights.
+  hframe <- matrix(rep(0,numnodes^2),numnodes)
+  hframe[1:(numnodes-1),numnodes] <- 1#
+  #hframe <- generateRandomMentalModel(5,input,output)#
+ # hframe <- aweights[,,1]!=0 ##pick out the correct mental model:
+  hframe[4:10,numnodes] <- 0  ##get rid of irrelevant nodes immediately.
+  hframe[1,numnodes]<-0        ##get rid of a good node.
+  diag(hframe) <- 0
+
+  houtput <- output#!rowSums(hframe!=0)
+  
+
+
+##now, set up the ensemble of hypothesezs about the frame.
+hweights <- array(rep(hframe,numExemplars)* (1-2*runif(numnodes^2*numExemplars)),dim=list(numnodes,numnodes,numExemplars))
+
+##estimate mean error of model throughout, for each node.
+meanerror <- matrix(0,nrow=numExemplars,ncol=nrow(hframe))
+
+ord <- sample(nrow(data))
+##this repeats a random order  enough times to fill in simreps. Same order each time.
+simtrials <- rep(ord,ceiling(simreps/length(ord)))[sample(1:simreps)]
+learningerror <- array(NA,
+                       dim=list(numExemplars,numnodes,simreps))
+trials <- ord
+counter <- 1
+
+
+  par(mfrow=c(1,3),mar=c(0,3,3,0))
+  ##Do the true world
+#  textcol <- c("black","white","white")[1+input + 2*output]
+  plotMM(aweights[,,1],aweights[,,1],input,output,coords=coord) ##take coordinates from earlier
+  title("Veridical Causal Model Structure",line=-1)
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  title("Mental model structure",line=-1)
+   
+  plotWeights(hweights,hframe,output,main=paste("Trial: 0"))
+
+
+prevdata <- data[1,]
+truth <- prevdata
+observed <- prevdata
+observed[houtput] <- NA
+
+## We iterate through simtrials in blocks.
+
+numblocks <- ceiling(simreps/reframecycle)
+
+trialsleft <- simreps+reframecycle
+trial <- 1
+
+
+for(block in 1:min(maxblockstosim,numblocks))
+  {
+  print(paste("BLOCK",block))
+  trialsleft <- trialsleft-reframecycle
+  steps <-min(trialsleft,reframecycle)
+  tmpdata <-  data[simtrials[trial-1+(1:steps)],]
+  
+ ##to be used later:   
+  hweights2 <- hweights
+  hweights3 <- hweights
+
+  ##this is the 'normal' learning stage:
+  out <- pureLearn(steps=steps,hweights,hframe,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   tmpdata,    stm)
+  
+  hweights <- out$hweights
+  stm <- out$stm
+  learningerror[,,(trial-1)+1:steps] <- out$learningerror
+  
+
+  
+  ###########################
+  ##Reframing
+  ###########################
+  
+  ###Now, go through pruning/elaboration processes
+  
+  
+  ##we need a way to search the space to generate new more elaborate hypotheses.
+  ##in general, this could involve looking at neighbors, 
+  ##looking at neighboring proper models,
+  ##getting instructions, etc.
+  
+  ##In all cases, this amounts to a contrast comparison, with counterfactual reasoning.
+  ## "what would my model look like if this were not the case?""
+  
+  ##test current model against stm:
+  ev <- evaluateMentalModel(stm,hweights,meanerror,
+                      observed,
+                      input,houtput,
+                      iter=10,noise=rep(0.01,numnodes),plot=F)
+
+  
+  ##select the nodes to remove now; so we don't add/remove the same node later.
+  remove <- ev$removeVar & !outer(houtput,houtput,"&")
+ 
+
+    
+  learn1 <- pureLearn(steps=200,hweights,hframe,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   stm,    stm)
+  
+  par(mfcol=c(2,3),mar=c(2,3,3,0))
+  plotWeights(learn1$hweights,hframe,output,main=paste("Original\nBlock:",block))
+
+  ##On each step, pick one link that is not in the model, and test it out.
+  ##find correlation of each node with the output node, within STM:
+  predictors <-   abs(cor(stm)[,output] * (hframe[,output]==0))
+  predictors[output]<-0
+  
+  ## Pick one node _probabilistically_ based on correlation with outcom. We could do a softmax here too.  
+  addnodes <- sample( (1:numnodes), prob=predictors/sum(predictors),size=1)
+  addnode <- addnodes[1]
+  
+  nodeAdded <- FALSE
+
+  ## Test against one with the missing piece
+  hframe2 <- hframe
+
+  hframe2[addnode,output] <- 1
+  hweights2[addnode,output,] <- rnorm(numExemplars)
+  
+
+  
+  learn2 <- pureLearn(steps=200,hweights2,hframe2,alpha,
+                   exemplarsToUpdate,numExemplars,
+                   houtput, input,
+                   stm,    stm)
+ 
+   ##this measures the error prediction after re-tuning; for the last 50 trials
+  fit1 <- sd(learn1$learningerror[,output,150:200])
+  fit2 <- sd(learn2$learningerror[,output,150:200])
+  
+  ##have we found a variable to add?
+  if(((fit2/fit1)< fitthresh) )
+  {
+    title(paste("Add node ",addnode))
+    print(paste("Adding node ",addnode))
+    
+    hframe<- hframe2
+    hweights <- learn2$hweights
+    remove[addnode,output] <- F
+    nodeAdded <- TRUE
+
+  }
+  
+  plotWeights(learn2$hweights,hframe2,output,main=paste("Add ",addnode))
+
+  rng <- range((c(0,out$learningerror,learn2$learningerror)))
+  
+  matplot(t((learn1$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
+  abline(0,0)
+  grid()
+  matplot(t((learn2$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
+  abline(0,0)
+  grid()
+    
+  
+    
+  
+  ##We need a way of comparing the current model to an alternative, to 
+  ##determine whether it is worthwhile using the alternative.
+  ##1. alternative with more nodes will certainly be better.
+  ##2. Even if the new node is irrelevant, it may take on values that move away from 0,
+  ##  just because things are getting better.
+  
+  barplot(c(fit1,fit2,fit2/fit1))
+  abline(1,0)
+  abline(fitthresh,0)
+  
+if(TRUE)
+{
+
+  print(paste("Node:", addnode, "improvement",(fit2/fit1)))
+ 
+}
+
+  ##remove any nodes recommended by evaluatemodel from the frame.
+  hframe[remove] <- 0
+  
+  ##zero out the weights:
+  for(i in 1:numExemplars)
+    hweights[,,i][remove] <- 0
+  
+  
+  plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
+  
+  trial <- trial + steps
+}
+
+```
+
+
+
+```{R}
+par(mfrow=c(1,3),mar=c(3,4,2,0))
+image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+  plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
+
+ lerr <- apply(abs(learningerror),3, mean)
+ plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+```
+
+

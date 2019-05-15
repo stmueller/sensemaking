@@ -1,0 +1,108 @@
+---
+title: "Sensemaking Simulation 101: Weather Prediction Task"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_dir = "../sim-output")})
+output:
+  html_document:
+    df_print: paged
+---
+
+This tries to integrate models into the NILM framework. The first of the 100-series simulations.
+
+```{r}
+library(ggnetwork)
+
+InitializeEnvironment<- function()
+{
+  ##set up a basic hash table so we can keep track of all nodes in model.
+  NODES <<- new.env() 
+  #LINKS <<- new.env()
+  ILMS <<- new.env()
+  
+}
+
+##testing code
+InitializeEnvironment()
+source("../src/Node.R")
+source("../src/ILM.R")
+source("../src/NILM.R")
+source("../src/Utility.R")
+
+Node(name="ItWillRain",
+     priorDist = "identity",
+     coefficients = list("value"=55))
+
+    
+Node(name="ItWillBeSunny",
+     priorDist = "normal",
+     coefficients = list(mean=70,sd=5))
+
+
+
+Node(name="Card1",
+     priorDist="Bernoulli",
+     coefficients=list(p=.5))
+Node(name="Card2",
+     priorDist="Bernoulli",
+     coefficients=list(p=.5))
+Node(name="Card3",
+     priorDist="Bernoulli",
+     coefficients=list(p=.5))
+Node(name="Card4",
+     priorDist="Bernoulli",
+     coefficients=list(p=.5))
+
+
+##Link up nodes here.
+pRain <-  ILM(name="PredictRain",
+          dependentnode = NODES[["ItWillRain"]],
+          inputnodes= c("Card1", "Card2","Card3","Card4"),
+          coefficients= c(-2,-1,1,2),
+          intercept = 0,
+          model = "linear",
+          sigma=0.5)
+
+
+ 
+pSun<-  ILM(name="PredictSun",
+          dependentnode = NODES[["ItWillBeSunny"]],
+          inputnodes= c("Card1", "Card2","Card3","Card4"),
+          coefficients= c(2,1,-1,-2),
+          intercept = 0,
+          model = "linear",
+          sigma=0.5)
+
+
+mb <- NILM(name="Weather Prediction 1.0",
+           ILMs = c("PredictRain","PredictSun"),
+           inputcoefficients =c(Card1=1,Card2=1,Card3=1,Card4=1,ItWillRain=1,ItWillBeSunny=1))
+           
+
+
+cases <-  data.frame(Card1=rep(0:1,each=8),
+                                Card2=rep(c(0,1,0,1),each=4),
+                                Card3=rep(c(0,1,0,1,0,1,0,1),each=2),
+                                Card4=rep(0:1,8),
+                                ItWillRain=rep(1,16),
+                                ItWillBeSunny = rep(0,16)
+)
+```
+
+
+
+```{r}
+
+p1 <- mb$plot()
+
+out <- mb$run(nrow(cases),environmentvalues=cases,reset=T)
+image(as.matrix(out[,-1]))
+
+```
+
+
+
+
+
