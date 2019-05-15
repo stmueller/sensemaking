@@ -1,5 +1,10 @@
 ---
 title: "Sensemaking Simulation 10: Adding nodes not in model."
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_dir = "../sim-output")})
 output:
   html_document:
     df_print: paged
@@ -8,7 +13,27 @@ output:
 
 
 
-```{r}
+```{r knitr_init, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=TRUE,
+               cache= TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+
+```
+
+
+
+```{r,error=F,messages=F, warning=F,cache=FALSE}
+
 source("../src/definitions.R")
 
 
@@ -68,6 +93,7 @@ To set up an environment, you need:
   visible <- rep(T,numnodes)
   
 coord <-    plotMM(aweights[,,1],aweights[,,1],input,output) ##take 
+
   
 ```
 
@@ -276,6 +302,9 @@ for(block in 1:numblocks)
   abline(1,0)
   abline(.5,0)
   
+  
+  
+  
   if(fit2/fit1<.5 & keep1)
   {
     title("Add node 1")
@@ -286,12 +315,16 @@ for(block in 1:numblocks)
     title("Add node 4")
   }
   
-  ##remove any nodes recommended by evaluatemodel from the frame.
-  hframe[ev$removeVar & !houtput] <- 0
-  ##zero out the weights:
-  hweights[,output,][ev$removeVar] <- 0
-
   
+  #select the links (not nodes) to remove now; so we don't add/remove the same node later.
+  remove <- ev$removeVar & !outer(houtput,houtput,"&")
+  
+  ##remove any nodes recommended by evaluatemodel from the frame.
+  hframe[remove] <- 0
+  
+    ##zero out the weights:
+  for(i in 1:numExemplars)
+    hweights[,,i][remove] <- 0  
   
   trial <- trial + steps
 }

@@ -13,7 +13,9 @@ output:
 
 <link rel="stylesheet" href="http://vis.supstat.com/assets/themes/dinky/css/scianimator.css"> 
 
-```{r, error=F,messages=F,warning=F}
+
+```{r,error=F,messages=F, warning=F,cache=FALSE}
+
 library(animation)
 library(gifski)
 source("../src/definitions.R")

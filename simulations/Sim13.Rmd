@@ -1,5 +1,6 @@
 ---
 title: "Sensemaking Simulation 13: Starting at random configurations"
+date: "`r Sys.Date()`"
 knit: (function(inputFile, encoding) { 
       rmarkdown::render(inputFile,
                         encoding=encoding, 
@@ -31,8 +32,7 @@ opts_knit$set(width=75)
 
 
 
-```{r,error=F,messages=F}
-
+```{r,error=F,messages=F, warning=F,cache=FALSE}
 
 source("../src/definitions.R")
 

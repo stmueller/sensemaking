@@ -228,7 +228,8 @@ pureLearn <- function(steps=1,weights,frame,alpha,
                       outputnodes,
                       inputnodes,
                       data,stm,
-                      maxback=nrow(weights))
+                      maxback=nrow(weights),
+                      printme = FALSE)
 {
   numnodes <- length(inputnodes)
   stmSize <- nrow(stm)
