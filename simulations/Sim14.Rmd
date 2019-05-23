@@ -48,21 +48,38 @@ Also, this require a binary choice ultimately, which requires an argmax operator
 ```{r}
 
 
-  numnodes<- 6
+##these predict 'rain', left features increase ,right features decrease.
+stimtable <-  rbind(c(0,0,0,1,0.14, 0.15),
+                    c(0,0,1,0, 0.084, 0.38),
+                    c(0,0,1,1, 0.087, 0.10),
+                    c(0,1,0,0, 0.084, 0.62),
+	                  c( 0,1,0,1, 0.064, 0.18),
+	                  c(0,1,1,0, 0.047, 0.50),
+	                 c(0,1,1,1, 0.041, 0.21),
+	             c(1,0,0,0, 0.14, 0.85),
+	             c(1,0,0,1, 0.058, 0.50),
+	            c( 1,0,1,0, 0.064, 0.82),
+	            c( 1,0,1,1, 0.032, 0.43),
+	            c( 1,1,0,0, 0.087, 0.90),
+	            c( 1,1,0,1, 0.032, 0.57),
+	            c( 1,1,1,0, 0.041, 0.79))
+
+
+
+  numnodes<- 5
   
-  ##learn from.
   
-  avals <- runif(numnodes)
   ##each row represents the outgoing connections from each node
   aweights <-array( matrix(rep(0,numnodes^2),numnodes),
     dim=list(numnodes,numnodes,1))
-  aweights[,numnodes,1] <- c(0,-10,-5,  5, 10,0)
-  aweights[,1,1] <- - c(0,-10,-5,  5, 10,0)
-    input <- c(F,T,T,T,T,F)
+  aweights[,numnodes,1] <- c(.224,.424,.575,.79,0)
+  input <- c(T,T,T,T,F)
   output <- !input
   visible <- rep(T,numnodes)
   
-  coord <-    plotMM(aweights[,,1],aweights[,,1],input,output) ##take 
+  coord <- cbind(c(0,0,0,0,4),c(2,1,-1,-2,0)) 
+  coord <-    plotMM(aweights[,,1],aweights[,,1],input,output,coord=coord) ##take 
+ 
   
 ```
 
@@ -70,20 +87,36 @@ Also, this require a binary choice ultimately, which requires an argmax operator
 
 # Generate the data:
 
-```{r}
+```{r,cache=F}
 
-data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input,noise=noise)
+reps <- 1000
+#data <- matrix(NA,ncol=numnodes,nrow=reps)
 
+samples <- sample(1:nrow(stimtable),size=reps,prob=stimtable[,5],replace=T)
+data.raw <- stimtable[samples,]
+data <- data.raw[,c(1:4,6)]
+##randomly sample outcome.  
+datalikelihood <- data.raw[,6]
+data[,5] <- runif(reps)<datalikelihood  #give probabilistic outcome
+databest <- datalikelihood>.5           #get the best answer for that pattern
+
+
+df <- data.frame(out=data[,5],
+           x1=data[,1],
+           x2=data[,2],
+           x3=data[,3],
+           x4=data[,4])
+
+ideal <- lm(out~x1+x2+x3+x4+ 0,data=df)
 ```
-
 
 
 
 ## The main simulation/learning phase.
 ##Use this for animation package:
-```{r,fig.width=8, fig.height=6, fig.show='animate', fig.path="../sim-output/img/"}
+#```{r,fig.width=8, fig.height=6, fig.show='animate', fig.path="../sim-output/img/"}
 ##Use this one for non-animation
-#```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
+```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
 
 ##Use this one for GIFSKI (requires installing RUST, etc.)
 ##```{r, animation.hook='gifski',fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE, interval=.2}
@@ -92,7 +125,7 @@ data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input
 ##Use this one for ffmpeg (requires installing RUST, etc.)
 #```{r, animation.hook='ffmpeg',ffmpeg.format='gif', dev='jpeg',      #fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE, interval=.2}
 
-oopt = ani.options(interval = 0.1,ani.res=200)
+#oopt = ani.options(interval = 0.1,ani.res=200)
 #set.seed(as.numeric(Sys.time()))
 seed <- seed + 1
 cat("Using random seed: ",seed,"\n")
@@ -100,7 +133,7 @@ set.seed(seed)
 printme <- FALSE
 numExemplars <- 10      ##how many exemplars
 exemplarsToUpdate <- 5
-simreps <- 1000
+simreps <- 250
 trial <- 1
 
 stmSize <- 5
@@ -108,25 +141,26 @@ stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 
 fitthresh <- .7
 ##implement learning here.
-alpha <- .1 #learning rate.
+alpha <- .05 #learning rate.
 decay <- .9995
-maxback <- 10  #how deeply to simulate causal model/back-propogate.
+maxback <- 50  #how deeply to simulate causal model/back-propogate.
 
 ##should reframing be done?
 doReframe <- FALSE
 startFull <- TRUE  ##should I start with a full frame or not? needs to be TRUE if doReframe is FALSE
-reframecycle <- 25 ##how often to engage in 'reframing'
-maxblockstosim <- 1000 ##this is just for debugging, so we can simulate fewer blocks but get 
+reframecycle <- 10 ##how often to engage in 'reframing'
+maxblockstosim <- 500 ##this is just for debugging, so we can simulate fewer blocks but get 
 
 smgamma <- 5  ##softmax parameter for sampling from links not in the model.
 mentalsimburnin <- 50 ##how long to evaluate the mental simulation.
 
+
+
+
   ##start at complete random weights.
   hframe <- matrix(rep(0,numnodes^2),numnodes)
-  hframe[2:5,numnodes] <- 1
-  hframe[2:5,1] <- 1  
-  
-    diag(hframe) <- 0
+  hframe[1:4,numnodes] <- 1
+  diag(hframe) <- 0
 
   houtput <- output#!rowSums(hframe!=0)
   
@@ -138,11 +172,17 @@ hweights <- array(rep(hframe,numExemplars)* (1-2*runif(numnodes^2*numExemplars))
 ##estimate mean error of model throughout, for each node.
 meanerror <- matrix(0,nrow=numExemplars,ncol=nrow(hframe))
 
-ord <- sample(nrow(data))
+#ord <- sample(nrow(data))
+ord <- 1:nrow(data)
 ##this repeats a random order  enough times to fill in simreps. Same order each time.
 simtrials <- rep(ord,ceiling(simreps/length(ord)))[sample(1:simreps)]
 learningerror <- array(NA,
                        dim=list(numExemplars,numnodes,simreps))
+predictions <- array(NA,
+                       dim=list(numExemplars,numnodes,simreps))
+
+actualdata <- matrix(NA,nrow=simreps,ncol=numnodes) ##these are the observed data
+
 trials <- ord
 counter <- 1
 
@@ -156,7 +196,7 @@ counter <- 1
   title("Mental model structure",line=-1)
    
   plotWeights(hweights,hframe,output,main=paste("Trial: 0"))
-
+  points(ideal$coef,pch=16,type="o",lwd=2,col="red")
 
 prevdata <- data[1,]
 truth <- prevdata
@@ -184,24 +224,31 @@ for(block in 1:min(maxblockstosim,numblocks))
   out <- pureLearn(steps=steps,hweights,hframe,alpha,
                    exemplarsToUpdate,numExemplars,
                    houtput, input,
-                   tmpdata,    stm)
+                   tmpdata,    stm,printme=F)
   
   hweights <- out$hweights
   stm <- out$stm
   learningerror[,,(trial-1)+1:steps] <- out$learningerror
   
+  predictions[,,(trial-1)+1:steps] <- out$predictions
   
-    
+  actualdata[trial-1+1:steps,] <- out$data
+  
+  
+  par(mfcol=c(2,3),mar=c(2,3,3,0))
+  plotWeights(hweights,hframe,output,main=paste("Original\nBlock:",block))
+  points(ideal$coef,pch=16,type="o",lwd=2,col="red")
+
+      
+if(doReframe)
+{
+
   learn1 <- pureLearn(steps=mentalsimburnin,hweights,hframe,alpha,
                    exemplarsToUpdate,numExemplars,
                    houtput, input,
                    stm,    stm)
   
-  par(mfcol=c(2,3),mar=c(2,3,3,0))
-  plotWeights(learn1$hweights,hframe,output,main=paste("Original\nBlock:",block))
 
-if(doReframe)
-{
   ###Now, go through pruning/elaboration processes
   
   
@@ -309,19 +356,40 @@ if(doReframe)
   trial <- trial + steps
   
 }
-ani.options(oopt)
+#ani.options(oopt)
 ```
 
 
 
 
 ```{R}
-par(mfrow=c(2,2),mar=c(3,4,2,0))
+
+model.bestguess <-  (t(predictions[,5,]) > .5)+0
+
+actual.feedback <- actualdata[,output]
+
+predict.df <- data.frame(x1= actualdata[,1],
+                         x2 = actualdata[,2],
+                         x3= actualdata[,3],
+                         x4= actualdata[,4])
+
+##this computes the best guess from the ideal model computed on the data
+actual.bestguess <-  predict(ideal,newdata=predict.df)>.5
+
+par(mfrow=c(2,3),mar=c(3,4,2,0))
+correct <- (model.bestguess)==actual.bestguess
+image(correct)
+plot(rowMeans(correct))
+points(lowess(rowMeans(correct)),col="red")
+```
+
+
+```{r}
 image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
   plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
 
- lerr <- apply(abs(learningerror),3, mean)
- plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+ lerr <- apply(abs(learningerror[,5,]),2, mean)
+  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
   points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
 
 ```

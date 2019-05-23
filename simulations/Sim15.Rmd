@@ -11,7 +11,7 @@ output:
 ---
 
 
-```{r, error=F,messages=F,warning=F}
+```{r,error=F,messages=F, warning=F,cache=FALSE}
 source("../src/definitions.R")
  
 source("../src/KnowledgeSpaceMentalModel.R")
