@@ -17,28 +17,29 @@ logodds <- function(p){log(p/(1-p))}
 ##this simulates a static process.
 ## eweights is the weight from a particular exemplar model
 ## vals is the set of data, with the to-be-predicted node NA'ed
-## iter is the number of steps to simulate
+## iter is the number of steps to simulate; this is for dynamic systems.
 ##visibleNodes is
 ## noise is the amount of noise to add to each value.
-simulateStatic <- function(eweights, vals, iter=10,
+simulateStatic <- function(eweights, vals, iter=1,
                            visibleNodes, noise=rep(0,length(vals))
                            )
 {
   n <- length(vals)
   out <- matrix(vals,nrow=iter,ncol=n,byrow=T)
-   tmpvals <- out[1,]
-   tmpvals[is.na(tmpvals)] <- 0
-  
-  for(i in 2:iter)
-    {
+  tmpvals <- out[1,]
+  tmpvals[is.na(tmpvals)] <- 0
+  if(iter>=0)
+  {
+    for(i in 1:iter)
+     {
     
-     tmpvals <- (as.vector(t(eweights) %*% tmpvals) + rnorm(n) * noise)
-     tmpvals[visibleNodes] <- vals[visibleNodes] #reset the input values to use  the visible values
+      tmpvals <- (as.vector(t(eweights) %*% tmpvals) + rnorm(n) * noise)
+      tmpvals[visibleNodes] <- vals[visibleNodes] #reset the input values to use  the visible values
      
-     out[i,] <-  tmpvals
+      out[i,] <-  tmpvals
     }
-  
-  return(out[iter,])
+  }
+  return(out[iter,,drop=F])
 }
 
 ##This simulates the results of the network given input values and
@@ -62,12 +63,16 @@ simulateEnsemble <- function(weights, vals,
     vals3 <- vals
     
     vals3[is.na(vals)] <- vals2[is.na(vals)]  #copy in random values when originals were missing 
-    
-    out[,i] <- simulateStatic(weights[,,i],vals3,iter,
+     
+    ##simulatestatic requires one 2-d matrix
+    out[,i] <- simulateStatic(weights[,,i],
+                              vals3,iter,
                               visibleNodes=inputnodes,
                               noise)
+    #out[inputnodes,i] <-vals3[inputnodes] 
   }
   
+  ##here, each row of out is a value, each column is a model exemplar.
   out
 }
 
@@ -77,7 +82,7 @@ simulateEnsemble <- function(weights, vals,
 learnWeights <- function(weights, vals, input,output, observed)
 {
   ##first, we make a prediction about the output nodes given the model assumptions.
-   prediction <- simulateEnsemble(weights,vals,iter=10,inputnodes=input)
+   prediction <- simulateEnsemble(weights,vals,iter=1,inputnodes=input)
    
 }
 
@@ -223,23 +228,39 @@ getPredictionDelta <- function(data,predicteddata,outputnode)
 ## just those connections.  allows you to 'freeze' your current model and 
 ## test what would happen if ,ou added another node, quickly learning its weight based
 ## on stm.
-pureLearn <- function(steps=1,weights,frame,alpha,
+
+
+#Returns:  This returns a list with named objects:
+## hweights:           the updated weights
+## stm:                updated STM matrix
+## learningerror:      record ofhe how far off each model was on each step
+## predictions:        The model's prediction of the non-input values.  That is, for each 
+##                     data row, it places in predictions its predicted value,  iteratively replacing anything it predicts as
+##                     it backtracks.  Non-predicted values remain NULL
+## data:               The actual data observed during the learning sequence.
+
+
+
+pureLearn <- function(steps=1,iweights,frame,alpha,
                       exemplarsToUpdate, numExemplars,
                       outputnodes,
                       inputnodes,
                       data,stm,
-                      maxback=nrow(weights),
+                      maxback=nrow(iweights),
                       printme = FALSE)
 {
   numnodes <- length(inputnodes)
   stmSize <- nrow(stm)
-  numExemplars <- dim(weights)[[3]]
+  numExemplars <- dim(iweights)[[3]]
   observed <- stm[1,] ##placeholder; records the 'true' data observed on a cycle.
   observed[outputnodes] <- NA
   
-  lerror <- array(NA, dim=list(numExemplars,numnodes,steps))
+  output.lerror <- array(NA, dim=list(numExemplars,numnodes,steps))
+ 
+  output.pdata <- array(NA,dim=list(numExemplars,numnodes,steps))
   
   sampling <- sample(1:nrow(data),steps,replace=T)
+  output.data <- data[sampling,]
   for(i in 1:steps)##go through this many examples of data.
   {
     exemplars <- sample(numExemplars)[1:exemplarsToUpdate]  ##pick, e.g., five at a time:
@@ -250,14 +271,13 @@ pureLearn <- function(steps=1,weights,frame,alpha,
     observed <- truth  ##what the observed truth is.
     observed[outputnodes]<- NA  ##zero out the output nodes, so that we are not using that.
     
-    
     ##this is predicting based ONLY on the input nodes.
     
     iter <- 1
     ##pick which node to use (of the output node(s)). Select only one per step.
     node <- mysamp(outputnodes,1)
     
-    
+    predictions <- matrix(NA,nrow=length(observed),ncol=numExemplars)
     ##now, we have made a set of predictions for 
     ##pick an output node and back-propogate error.
     while(iter < maxback)
@@ -266,26 +286,29 @@ pureLearn <- function(steps=1,weights,frame,alpha,
      if(printme) cat("Node:",node ,"| ")
      filter <-  !((1:length(outputnodes)) == node ) &!outputnodes & frame[,node]
   
-  
-  ##make a prediction of each missing value, for each model.
-  ## we will make a prediction for ALL elements of the ensemble, so we can 
-  ##more easily track error across the ensemble.  But we only update the ensemble. (wts filters this)
-  predictions <- simulateEnsemble(weights[,,,drop=FALSE],
-                                  observed,iter=10,
+     ##only go through all this if the frame has available nodes to add.
+     inp <- frame[,node]
+     
+     if(sum(abs(inp))>0)
+     {
+       
+     ##make a prediction of each missing value, for each model.
+     ## we will make a prediction for ALL elements of the ensemble, so we can 
+     ##more easily track error across the ensemble.  But we only update the ensemble. (wts filters this)
+     curpred <- simulateEnsemble(weights = iweights,
+                                  vals=observed,iter=1,
                                   inputnodes=filter, ##input
-                                  noise=rep(0.0001,length(filter)))  
+                                  noise=rep(0.000,length(filter)))  
   
-  
-  ##only go through all this if the frame has available nodes to add.
-  inp <- frame[,node]
-  if(sum(abs(inp))>0)
-  {
+    predictions[node,] <- curpred[node,]
+    output.pdata[,,i] <- t(predictions)
+
     ##for each model, get the error for this node's prediction:
     delta2 <- t(truth -(predictions))[,node] #here is an error signal, comparing to all known true values.
     ##^^^^^this is the amount we were off, for each model.
     
     ##Calculate the input weights of the exemplar models
-    wts <- t(weights[,node,exemplars])  #* hframe[,node] ##filter weigths by frame.
+    wts <- t(iweights[,node,exemplars])  #* hframe[,node] ##filter weigths by frame.
     #^^^^  these are the original weights we need to update.
     
     
@@ -295,25 +318,29 @@ pureLearn <- function(steps=1,weights,frame,alpha,
     wts <- wts + change
     
     
-    weights[,node,exemplars] <- t(wts)
+    iweights[,node,exemplars] <- t(wts)
     
-    lerror[,,i] <- (delta2)
+    output.lerror[,node,i] <- (delta2)
     }else{
+      
       if(printme) cat ("Maximum backprop\n")
       iter <- maxback
-  }  
+    }  
    
      ##now, move backward to one of the incoming nodes
      node <- mysamp(inp>0,1)
-  
-    iter <- iter + 1
+     iter <- iter + 1
     
     }
 
     
       
- }
-  return (list(hweights=weights,stm=stm,learningerror=lerror))
+  }
+
+  return (list(hweights=iweights,stm=stm,
+               learningerror=output.lerror,
+               predictions=output.pdata,
+               data=output.data))
 }
 
 ## this examines the 'output' values, predicted by the 'input' values, 
@@ -325,10 +352,9 @@ evaluateMentalModel <- function(data,hweights,meanerror,
                                 observed,
                                 input,output,
                                 thresh = .005,  ##threshold for suggesting removal.
-                                iter=20,noise=rep(0.001,nrow(hweights[,,1])),
+                                iter=1,noise=rep(0.001,nrow(hweights[,,1])),
                                 plot=T
-                              
-)
+                              )
 {
   #now, let's make a prediction about the data from the model, using only inputs.
   
