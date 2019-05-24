@@ -11,9 +11,6 @@ output:
 ---
 
 
-<link rel="stylesheet" href="http://vis.supstat.com/assets/themes/dinky/css/scianimator.css"> 
-
-
 ```{r,error=F,messages=F, warning=F,cache=FALSE}
 
 library(animation)
@@ -131,9 +128,10 @@ seed <- seed + 1
 cat("Using random seed: ",seed,"\n")
 set.seed(seed)
 printme <- FALSE
-numExemplars <- 10      ##how many exemplars
+plotme <- TRUE
+numExemplars <- 11      ##how many exemplars (odd lets us have a tie-breaker)
 exemplarsToUpdate <- 5
-simreps <- 250
+simreps <- 350
 trial <- 1
 
 stmSize <- 5
@@ -141,7 +139,7 @@ stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 
 fitthresh <- .7
 ##implement learning here.
-alpha <- .05 #learning rate.
+alpha <- .02 #learning rate.
 decay <- .9995
 maxback <- 50  #how deeply to simulate causal model/back-propogate.
 
@@ -186,7 +184,8 @@ actualdata <- matrix(NA,nrow=simreps,ncol=numnodes) ##these are the observed dat
 trials <- ord
 counter <- 1
 
-
+if(plotme)
+{
   par(mfrow=c(2,2),mar=c(0,3,3,0))
   ##Do the true world
 #  textcol <- c("black","white","white")[1+input + 2*output]
@@ -197,6 +196,8 @@ counter <- 1
    
   plotWeights(hweights,hframe,output,main=paste("Trial: 0"))
   points(ideal$coef,pch=16,type="o",lwd=2,col="red")
+}
+
 
 prevdata <- data[1,]
 truth <- prevdata
@@ -234,11 +235,12 @@ for(block in 1:min(maxblockstosim,numblocks))
   
   actualdata[trial-1+1:steps,] <- out$data
   
-  
+  if(plotme)
+  {
   par(mfcol=c(2,3),mar=c(2,3,3,0))
   plotWeights(hweights,hframe,output,main=paste("Original\nBlock:",block))
   points(ideal$coef,pch=16,type="o",lwd=2,col="red")
-
+  }
       
 if(doReframe)
 {
@@ -318,7 +320,8 @@ if(doReframe)
     nodeAdded <- TRUE
 
   }
-  
+if(plotme)
+{
   plotWeights(learn2$hweights,hframe2,output,main=paste("Add ",addnode))
   
   
@@ -336,7 +339,7 @@ if(doReframe)
   barplot(c(fit1,fit2,fit2/fit1))
   abline(1,0)
   abline(fitthresh,0)
-
+}
    print(paste("Node:", addnode, "improvement",(fit2/fit1)))
   
   }
@@ -350,9 +353,10 @@ if(doReframe)
 
 }##end of reframe process
   
-  
+  if(plotme)
+  {
   plotMM(hframe,apply(hweights,c(1,2),mean),input,houtput,coords=coord)
-  
+  }
   trial <- trial + steps
   
 }
@@ -376,11 +380,25 @@ predict.df <- data.frame(x1= actualdata[,1],
 ##this computes the best guess from the ideal model computed on the data
 actual.bestguess <-  predict(ideal,newdata=predict.df)>.5
 
-par(mfrow=c(2,3),mar=c(3,4,2,0))
-correct <- (model.bestguess)==actual.bestguess
-image(correct)
-plot(rowMeans(correct))
-points(lowess(rowMeans(correct)),col="red")
+par(mfrow=c(1,3),mar=c(3,4,2,0))
+optimal <- (model.bestguess)==actual.bestguess
+bins <- rep((1:7)*50,each=50)
+
+optimal.bybin <- aggregate(optimal,list(bins),mean)
+
+optimal.bybin2 <- aggregate(optimal,list(bins),length)
+
+image(optimal[,-1],col=c("white","black"))
+
+matplot(1:7*50,(optimal.bybin[,-1]),col="black",lty=3,type="o",main="Proportion optimal responses",xlim=c(0,350))
+points(1:7*50,rowMeans(optimal.bybin[,-1]),col="red",lwd=3,pch=16,lty=1,type="l")
+
+##now, let's look at the 'best guess' from the ensemble.  Here each member of the ensemble has a vote,
+## and we take majority rules as our response. 
+resp <- aggregate(apply(optimal,1,function(x){mean(x)>.5}),list(bins),mean)
+points(resp,col="navy",lty=1,type="o",lwd=2)
+      
+
 ```
 
 
