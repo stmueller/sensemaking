@@ -44,6 +44,8 @@ if(exists("seed"))
     seed <- 100
 }
 
+seed <- 300
+  
 cat("Using random seed: ",seed,"\n")
 set.seed(seed)
 
@@ -117,7 +119,7 @@ set.seed(seed)
 printme <- FALSE
 numExemplars <- 10      ##how many exemplars
 exemplarsToUpdate <- 5
-simreps <- 2500
+simreps <- 1000
 trial <- 1
 
 stmSize <- 25
@@ -126,7 +128,7 @@ stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 fitthresh <- .7
 ##implement learning here.
 alpha <- .25 #learning rate.
-decay <- .9995
+decay <- 1.0
 maxback <- 10  #how deeply to simulate causal model/back-propogate.
 
 
@@ -259,10 +261,10 @@ for(block in 1:min(maxblockstosim,numblocks))
 
   
   par(mfcol=c(2,3),mar=c(2,3,3,0))
-  plotWeights(learn1$hweights,hframe,output,main="Original")
+  plotWeights(learn1$hweights,hframe,output,main=paste("Original | cycle",(trial-1)))
   plotWeights(learn2$hweights,hframe2,output,main=paste("Add ",addnode))
 
-  rng <- range((c(0,out$learningerror,learn2$learningerror)))
+  rng <- range((c(0,out$learningerror,learn2$learningerror)),na.rm=T)
   
   matplot(t((learn1$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
   abline(0,0)
@@ -343,8 +345,12 @@ par(mfrow=c(1,3),mar=c(3,4,2,0))
 image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
   plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
 
- lerr <- apply(abs(learningerror),3, mean)
+ lerr <- apply(abs(learningerror),3, function(x){mean(x,na.rm=T)})
  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+par(mfrow=c(1,1))  
+  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
   points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
 
 ```

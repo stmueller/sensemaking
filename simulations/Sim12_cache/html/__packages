@@ -1,0 +1,8 @@
+base
+knitr
+rmdformats
+ggplot2
+statnet.common
+network
+sna
+RColorBrewer

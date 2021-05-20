@@ -88,9 +88,9 @@ data <- generateData(reps=1000,aweights=aweights,avals=avals,iter=10,input=input
 ```{r echo=FALSE,message=FALSE,warning=FALSE}
 #set.seed(as.numeric(Sys.time()))
 printme <- FALSE
-numexemplars <- 10      ##how many exemplars
+numExemplars <- 10      ##how many exemplars
 exemplarsToUpdate <- 5
-simreps <- 250
+simreps <- 500
 trial <- 1
 
 stmSize <- 5
@@ -98,11 +98,15 @@ stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 
 ##implement learning here.
 alpha <- .25 #learning rate.
-decay <- .9995
+decay <- 1.0
 maxback <- 10  #how deeply to simulate causal model/back-propogate.
 
 
 reframecycle <- 50 ##how often to engage in 'reframing'
+
+
+
+startingnoise <- 1
 
 
   ##start at complete random weights.
@@ -110,7 +114,8 @@ reframecycle <- 50 ##how often to engage in 'reframing'
   hframe[1:(numnodes-1),numnodes] <- 1#
   #hframe <- generateRandomMentalModel(5,input,output)#
  # hframe <- aweights[,,1]!=0 ##pick out the correct mental model:
-  hframe[4:27,numnodes] <- 0  ##get rid of irrelevant nodes immediately.
+  hframe[24:27,numnodes] <- 0  ##get rid of irrelevant nodes immediately.
+  #hframe[4:27,numnodes] <- 0  ##get rid of irrelevant nodes immediately.
   diag(hframe) <- 0
 
   houtput <- output#!rowSums(hframe!=0)
@@ -118,9 +123,7 @@ reframecycle <- 50 ##how often to engage in 'reframing'
 
 
 ##now, set up the ensemble of hypothesezs about the frame.
-hweights <- array(rep(hframe,numexemplars) *  
-                             (1-2*runif(numnodes^2*numexemplars)),dim=list(numnodes,numnodes,numexemplars))
-
+hweights <- array(rep(hframe,numexemplars)* (startingnoise -2*startingnoise*runif(numnodes^2*numexemplars)),dim=list(numnodes,numnodes,numexemplars))
 ##estimate mean error of model throughout, for each node.
 meanerror <- matrix(0,nrow=numexemplars,ncol=nrow(hframe))
 
@@ -220,15 +223,30 @@ while(iter < maxback)
 ##now, let's calculate whether to reframe things.
     if(trial %% reframecycle == 0)
     {
+      
+      ##first, can we get rid of any terrible ensemble members? Let's get rid of the worst and replace it with the best.
+      
+    
+      
+      
+      
+      
       ev <- evaluateMentalModel(stm,hweights,meanerror,
                       observed,
                       input,houtput,
                       iter=10,noise=rep(0.01,numnodes),plot=F)
 
-  ##remove it from the frame.
-  hframe[ev$removeVar & !houtput] <- 0
+  ##select the links (not nodes) to remove now; so we don't add/remove the same node later.
+  remove <- ev$removeVar & !outer(houtput,houtput,"&")
+
+
+  ##remove any nodes recommended by evaluatemodel from the frame.
+  hframe[remove] <- 0
+  
   ##zero out the weights:
-  hweights[,output,][ev$removeVar] <- 0
+  for(i in 1:numExemplars)
+    hweights[,,i][remove] <- 0
+  
   
   par(mfrow=c(1,3),mar=c(0,3,3,0))
   ##Do the true world

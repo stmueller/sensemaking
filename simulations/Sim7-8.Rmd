@@ -1,5 +1,10 @@
 ---
 title: "Sensemaking Simulation 7/8"
+date: "`r Sys.Date()`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_dir = "../sim-output")})
 output:
   html_document:
     df_print: paged
@@ -21,11 +26,18 @@ set.seed(seed)
 
 ##  7/8: exploring contrast in learning
 
-test <- 8
+test <- 7
 
 ```
 
 
+## About:
+
+This is documented in 2019 report as model #2, which is really model 7 in this file.
+Its purpose is to explore how adding variability to initial estimates will impact learning.
+
+
+Model 8/9 were experiments that never really panned out that explored contrast.
 
 
 ## Setup
@@ -39,13 +51,18 @@ To set up an environment, you need:
 5. Specify initial hypothesis space (hvals/hweights/hframe,houtput)
 
 
-```{r}
+
+
+
+## The main simulation/learning phase.
+```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
+
 if(test==7 | test==8)
 { 
   ##input nodes and 1 output node.
   ## there are only 6 relevant nodes, the rest are garbage.
   ##test 8 is the random contrast condition for the same set-up
-  ##test 9 is a crafted constrast condition.
+  ##test 9 is a crafted contrast condition.
   
   numnodes<- 15
   
@@ -79,7 +96,12 @@ if(test==7 | test==8)
 
 ## Setup complete. Display the true and mental-model environment
 
-```{r}
+
+
+
+## The main simulation/learning phase.
+```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
+
   par(mfrow=c(1,2),mar=c(0,0,0,0))
   ##Do the true world
 #  textcol <- c("black","white","white")[1+input + 2*output]
@@ -125,25 +147,35 @@ data2 <- generateData(reps=1000,aweights=aweights2,avals=avals2,iter=10,input=in
 
 ## The main simulation/learning phase.
 
-```{r echo=FALSE,message=FALSE,warning=FALSE, }
+```{r echo=FALSE,message=FALSE,warning=FALSE, fig.width=9,fig.height=4}
 #set.seed(as.numeric(Sys.time()))
 printme <- FALSE
 numexemplars <- 10      ##how many exemplars
 exemplarsToUpdate <- 5
-simreps <- 1500
+simreps <- 250
 trial <- 1
 
 
 ##implement learning here.
 alpha <- .25 #learning rate.
-decay <- .9995
+decay <- 1.0
 maxback <- 10
 
 
 
+learningerrors <- list()
+
+
+index <- 1
+for(startingnoise in c(.1,1,10,50,100))
+{
 
 ##now, set up the ensemble of hypothesezs about the frame.
-hweights <- array(rep(hframe,numexemplars)* (1-2*runif(numnodes^2*numexemplars)),dim=list(numnodes,numnodes,numexemplars))
+  
+##we will have the ensemble initial estimates average the truth, with more or less noise around that.
+  
+  
+hweights <-  + array(rep(aweights,numexemplars) + rep(aweights !=0,numexemplars)* (startingnoise -2*startingnoise*runif(numnodes^2*numexemplars)),dim=list(numnodes,numnodes,numexemplars))
 
 ##estimate mean error of model throughout, for each node.
 meanerror <- matrix(0,nrow=numexemplars,ncol=nrow(hframe))
@@ -242,7 +274,6 @@ if(test==8){
       
       dtruth[node] <- 0
       worst <- order(abs(dtruth),decreasing=T)[6:length(dtruth)]
-      
       change[,worst] <- 0 
       
       ##find the subset of nodes that have the largest difference in input values
@@ -276,22 +307,128 @@ if(test==8){
  
  prevdata <- truth##update memory for prior trial.
 
+ 
+ 
 }
-```
 
-
-```{r}
 if(test==7|test==8)
 {
-par(mfrow=c(1,3),mar=c(3,4,2,0))
-  image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
-  matplot(hweights[,numnodes,],type="b",pch=16,lty=3,col="black")
+ par(mfrow=c(1,2),mar=c(6,5,2,0))
+#  image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+  matplot(hweights[,numnodes,],type="b",pch=16,lty=3,col="black",bty="L",
+          xlab="Feature index",ylab="Weight",xaxt="n",main=paste("Final parameter estimates\nInitial noise:",startingnoise))
+  axis(1,1:15)
  lerr <- apply(abs(learningerror),3, mean)
-  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round",bty="L",
+       xlim=c(0,250),ylim=c(0,50))
+  
   points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
 }
 
+
+learningerrors[[index]] <- learningerror
+index <- index + 1
+}
 ```
+
+```{r}
+##this will temporarily keep track of a learning sequence/simulation.
+lerr_.1 <- learningerrors[[1]]
+lerr_1 <-  learningerrors[[2]]
+lerr_10 <-  learningerrors[[3]]
+lerr_50 <-  learningerrors[[4]]
+lerr_100 <-  learningerrors[[5]]
+```
+
+
+
+
+
+```{r fig.width=7,fig.height=5,echo=FALSE,message=FALSE,warning=FALSE}
+if(TRUE)
+{
+ par(mfrow=c(1,1),mar=c(6,5,2,0))
+#  image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+
+  plot(0,0, type="n",col="grey30",main=paste("Error over time"),
+       ylab="Mean absolute error",xlab="Learning epoch",bty="L",
+       xlim=c(-10,500),ylim=c(0,60))
+
+ lerr <- apply(abs(lerr_.1),3, mean)
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+ lerr <- apply(abs(lerr_1),3, mean)
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+lerr <- apply(abs(lerr_10),3, mean)
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+lerr <- apply(abs(lerr_50),3, mean)
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+  lerr <- apply(abs(lerr_100),3, mean)
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+ text(0,c(5,7,9,28,55), c(.1,1,10,50,100),pos=2,cex=.6)
+ }
+
+
+
+if(TRUE)
+{
+ par(mfrow=c(1,1),mar=c(6,5,2,0))
+#  image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+
+  plot(0,0, type="n",col="grey30",main=paste("Error over time"),
+       ylab="Mean absolute error",xlab="Learning epoch",bty="L",
+       xlim=c(-10,550),ylim=c(0,120))
+
+  
+ lerr <- apply(abs(lerr_.1),3, mean)
+ points(lerr,pch=16,cex=.5,col="red")
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+
+ lerr <- apply(abs(lerr_1),3, mean)
+ points(lerr,pch=16,cex=.5,col="orange")
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="orange")
+
+ lerr <- apply(abs(lerr_10),3, mean)
+ points(lerr,pch=16,cex=.5,col="yellow")
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="yellow")
+
+lerr <- apply(abs(lerr_50),3, mean)
+ points(lerr,pch=16,cex=.5,col="green4")
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="green4")
+
+lerr <- apply(abs(lerr_100),3, mean)
+ points(lerr,pch=16,cex=.5,col="blue")
+ points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="blue")
+
+#  lerr <- apply(abs(lerr.5),3, mean)
+# points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="blue")
+#rect(500,0,550,10,border="white",col="white")
+#text(c(500,500,500,500),c(3,1,0,4), c(.05,.1,".2/.3",.4),pos=4,cex=.6)
+
+ 
+ }
+
+
+```
+
+
+```{r fig.width=7,fig.height=5,echo=FALSE,message=FALSE,warning=FALSE}
+if(1)
+{
+ par(mfrow=c(1,1),mar=c(6,5,2,0))
+#  image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
+  lerr <- apply(abs(learningerror),3, mean)
+  plot(lerr,col="grey30",main=paste("Error over time\n","noise=+/-",startingnoise),
+       ylab="Mean absolute error",xlab="Learning round",bty="L",
+       xlim=c(0,1600))
+  
+  points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
+}
+```
+
 
 
 ```{r}

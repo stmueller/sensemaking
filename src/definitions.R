@@ -14,16 +14,18 @@ logit <- function(x){1/(1+exp(-x))}
 logodds <- function(p){log(p/(1-p))}
 
 
-##this simulates a static process.
+##this simulates a static evaluation/prediction process.
 ## eweights is the weight from a particular exemplar model
 ## vals is the set of data, with the to-be-predicted node NA'ed
 ## iter is the number of steps to simulate; this is for dynamic systems.
-##visibleNodes is
+##visibleNodes is specified because we want to use the given values, 
+## not those predicted by internal model (if the model makes predictions about input)
 ## noise is the amount of noise to add to each value.
 simulateStatic <- function(eweights, vals, iter=1,
                            visibleNodes, noise=rep(0,length(vals))
                            )
 {
+
   n <- length(vals)
   out <- matrix(vals,nrow=iter,ncol=n,byrow=T)
   tmpvals <- out[1,]
@@ -33,9 +35,10 @@ simulateStatic <- function(eweights, vals, iter=1,
     for(i in 1:iter)
      {
     
+      tmpvals <- unlist(tmpvals) ##this may end up being a list or some reason.
+
       tmpvals <- (as.vector(t(eweights) %*% tmpvals) + rnorm(n) * noise)
       tmpvals[visibleNodes] <- vals[visibleNodes] #reset the input values to use  the visible values
-     
       out[i,] <-  tmpvals
     }
   }
@@ -64,12 +67,16 @@ simulateEnsemble <- function(weights, vals,
     
     vals3[is.na(vals)] <- vals2[is.na(vals)]  #copy in random values when originals were missing 
      
+ 
     ##simulatestatic requires one 2-d matrix
-    out[,i] <- simulateStatic(weights[,,i],
+      retval <- simulateStatic(weights[,,i],
                               vals3,iter,
                               visibleNodes=inputnodes,
                               noise)
-    #out[inputnodes,i] <-vals3[inputnodes] 
+    
+
+
+      out[,i] <- unlist(retval)  ##this is needed when you have multiple output nodes???
   }
   
   ##here, each row of out is a value, each column is a model exemplar.
@@ -240,15 +247,28 @@ getPredictionDelta <- function(data,predicteddata,outputnode)
 ## data:               The actual data observed during the learning sequence.
 
 
+##steps is an optional argument. If missing, it will use nrow(data), which means it will
+##use every row of data, in order, once. If longer, it will recycle.
 
-pureLearn <- function(steps=1,iweights,frame,alpha,
+pureLearn <- function(iweights,frame,alpha,
                       exemplarsToUpdate, numExemplars,
-                      outputnodes,
-                      inputnodes,
-                      data,stm,
+                      outputnodes, inputnodes,
+                      
+                      steps=nrow(data),
+                      data,
+                      stm,
+                 
                       maxback=nrow(iweights),
-                      printme = FALSE)
+                      sample=F,
+                      printme = FALSE,
+                      fixed=NULL)
 {
+  ##the fixed variable specifies links that don't get updated at all. They will use their initial values.
+  if(is.null(fixed))
+  {
+    fixed <- matrix(F,nrow=nrow(frame),ncol=ncol(frame))
+  }
+  
   numnodes <- length(inputnodes)
   stmSize <- nrow(stm)
   numExemplars <- dim(iweights)[[3]]
@@ -256,17 +276,33 @@ pureLearn <- function(steps=1,iweights,frame,alpha,
   observed[outputnodes] <- NA
   
   output.lerror <- array(NA, dim=list(numExemplars,numnodes,steps))
- 
   output.pdata <- array(NA,dim=list(numExemplars,numnodes,steps))
+ 
+  ##This either samples the data block randomly or repeats it until it is big enough to match the steps.
+  ##However, data may have NAs. This could happen if stm is used to forecast data but the stepsize is small.
+  ##So, we should only use the rows that are NOT NA
   
-  sampling <- sample(1:nrow(data),steps,replace=T)
+  notNA <- which(!is.na(rowSums(data)))
+  
+  if(sample)
+  { ##randomly sample the data:
+    sampling <- sample(notNA,steps,replace=T)
+  
+   }else{
+    ##repeat and reuse the data:
+     sampling <- rep(notNA,length.out=steps)
+   }
+  
+  
   output.data <- data[sampling,]
   for(i in 1:steps)##go through this many examples of data.
   {
     exemplars <- sample(numExemplars)[1:exemplarsToUpdate]  ##pick, e.g., five at a time:
-    truth <- data[sampling[i],]  #what is really the case
-    stm[(i-1)%%stmSize+1,] <- truth  ##populate a short-term memory history. 
-    
+
+
+    truth <- as.matrix(data[sampling[i],])  #what is really the case
+    stm[(i-1)%%stmSize+1,] <- truth[,1]  ##populate a short-term memory history. 
+
     
     observed <- truth  ##what the observed truth is.
     observed[outputnodes]<- NA  ##zero out the output nodes, so that we are not using that.
@@ -285,7 +321,6 @@ pureLearn <- function(steps=1,iweights,frame,alpha,
       
      if(printme) cat("Node:",node ,"| ")
      filter <-  !((1:length(outputnodes)) == node ) &!outputnodes & frame[,node]
-  
      ##only go through all this if the frame has available nodes to add.
      inp <- frame[,node]
      
@@ -295,35 +330,54 @@ pureLearn <- function(steps=1,iweights,frame,alpha,
      ##make a prediction of each missing value, for each model.
      ## we will make a prediction for ALL elements of the ensemble, so we can 
      ##more easily track error across the ensemble.  But we only update the ensemble. (wts filters this)
+  
      curpred <- simulateEnsemble(weights = iweights,
+                                 
                                   vals=observed,iter=1,
                                   inputnodes=filter, ##input
                                   noise=rep(0.000,length(filter)))  
-  
+
+    
+    ##this updates predictions for just the current node
     predictions[node,] <- curpred[node,]
     output.pdata[,,i] <- t(predictions)
-
-    ##for each model, get the error for this node's prediction:
-    delta2 <- t(truth -(predictions))[,node] #here is an error signal, comparing to all known true values.
-    ##^^^^^this is the amount we were off, for each model.
     
+
+     
+    delta <- (as.matrix(truth)[,rep(1,ncol(predictions))])  - predictions
+  #  print(cat("Max: " , max(delta)))
+
+        ##for each model, get the error for this node's prediction:
+    loss <- t(delta[node,keep=T])
+    ##^^^^^this is the amount we were off, for each model.
+  
     ##Calculate the input weights of the exemplar models
-    wts <- t(iweights[,node,exemplars])  #* hframe[,node] ##filter weigths by frame.
+    wts <- t(iweights[,node,exemplars])   ##filter weights by frame.
     #^^^^  these are the original weights we need to update.
     
     
+    
+    ## truth may have NAs in it--for nodes we know nothing about or those
+    ##that are placeholders.  These NAs propagate to change, wts, and iweights
+    ##and could screw things up.
+    na.filt <- !is.na(truth)
+    
     ##change is how much each weight needs to be adjusted.
-    #  change <-  t(alpha * (delta2) * truth * t(abs(sign(weights)))) ##abs(sign(weights)) forces output to 0 and preserves exemplars.
-    change <- t(alpha * truth %*% t(delta2[exemplars]) * t(abs(sign(wts))))
-    wts <- wts + change
+    
+    
+    change <- t(alpha * (truth) %*% (loss[1,exemplars,drop=F]) * t(abs(sign(wts))))
+    change[is.na(change)] <- 0  ##don't adjust any NA values.
+    
+    change[fixed[,node]] <- 0         ##Don't adjust any fixed weights either.
+    wts[,na.filt] <- wts[,na.filt] + change[,na.filt]
     
     
     iweights[,node,exemplars] <- t(wts)
-    
-    output.lerror[,node,i] <- (delta2)
+
+    output.lerror[,node,i] <- (loss)
     }else{
       
-      if(printme) cat ("Maximum backprop\n")
+      if(printme) cat ("Maximum previous node\n")
       iter <- maxback
     }  
    
@@ -351,14 +405,14 @@ pureLearn <- function(steps=1,iweights,frame,alpha,
 evaluateMentalModel <- function(data,hweights,meanerror,
                                 observed,
                                 input,output,
-                                thresh = .005,  ##threshold for suggesting removal.
+                                thresh = .025,  ##threshold for suggesting removal.
                                 iter=1,noise=rep(0.001,nrow(hweights[,,1])),
                                 plot=T
                               )
 {
   #now, let's make a prediction about the data from the model, using only inputs.
   
-  
+  numExemplars <- dim(hweights)[[3]]
   sets <- dim(hweights)[3]
   keep <- matrix(NA, nrow=nrow(data),ncol=sum(output))
   consistent <- rep(NA,nrow(data))
@@ -404,20 +458,22 @@ evaluateMentalModel <- function(data,hweights,meanerror,
   
   means <- matrix(0,dim(hweights)[1],dim(hweights)[2])
   sds <-   matrix(0,dim(hweights)[1],dim(hweights)[2])
-
+                     
   for(i in 1:dim(hweights)[1])
    {
     means[i,] <- apply(hweights[i,,],1,mean)
     sds[i,] <- apply(hweights[i,,],1,sd)
    }
   
-
-  ##this remove stat has not proved to be consistent.
-  remove <- keepPredictor(hweights,data,output,thresh=.025)
+  
+  ##this remove stat is how we determine whether to cull a predictor from the model.
+  
+  remove <- keepPredictor(hweights,data,output,thresh=thresh)
   removeMat = matrix(F,nrow=nrow(hweights),
                        ncol=ncol(hweights))
   removeMat[remove,output] <- TRUE
-#   if(0)
+
+  #   if(0)
 #   {
 #   
 #   ##use this to judge whether a node might be removed.
@@ -483,9 +539,55 @@ evaluateMentalModel <- function(data,hweights,meanerror,
               consistent=consistent,
               removeVar=removeMat,
               mean=means,
-              sd =sds))
+              sd =sds ))
 }
 
+
+
+## This function just looks at the parameter estimates of the mental model
+## and determines any relative outliers.  It does not look at predictions,
+## Just thetail of the mental model.
+evaluateEnsemble <- function(hweights,
+                                input,output)
+{
+  
+  
+  variances <- apply(hweights[input,output,],2,var)
+  sses <-  variances/sum(variances)
+  
+  
+  #now, let's make a prediction about the data from the model, using only inputs.
+  
+  numExemplars <- dim(hweights)[[3]]
+  
+  
+  ##we can see if any links should be removed by examining the z-score of the variables.
+  ##We can't really tell by z-score alone if values have converged--this needs to be examined
+  ##in the prediction space, but z-score gives us a reasonable order to examine the variables in:
+  
+  means <- matrix(0,dim(hweights)[1],dim(hweights)[2])
+  sds <-   matrix(0,dim(hweights)[1],dim(hweights)[2])
+  
+  for(i in 1:dim(hweights)[1])
+  {
+    means[i,] <- apply(hweights[i,,],1,mean)
+    sds[i,] <- apply(hweights[i,,],1,sd)
+  }
+  
+  
+  ##This calculates a z-score for each member of the ensemble.  It should be able to identify the 
+  ##worst model.
+  ensembleZ <- abs((hweights - array(means,c(dim(hweights)[1],dim(hweights)[2],numExemplars))))/
+                     array(sds,c(dim(hweights)[1],dim(hweights)[2],numExemplars))
+  
+  meanZ <- colMeans(ensembleZ[input,output,])
+  
+  
+    return(list(mean=means,
+              sd =sds,
+              sse=sses,
+              meanEnsembleZ = meanZ ))
+}
 
 
 ##this evaluates a model against data and judges whether
@@ -496,8 +598,8 @@ evaluateMentalModel <- function(data,hweights,meanerror,
 keepPredictor <- function(hweights,data,output,thresh=.025)
 {
   
-  outcomesd <- sd(data[,output])
-  predictorsd <- apply(data,2,sd)
+  outcomesd <- sd(data[,output],na.rm=T)
+  predictorsd <- apply(data,2,function(x){sd(x,na.rm=T)})
   
   ##this gives standardized coefficients for the ensemble.
   standardized <-hweights[,output,]*predictorsd/outcomesd
@@ -522,6 +624,7 @@ plotMM <- function(base,
                    coords=NULL, 
                    color="navy",
                    centerx=0, centery=0, scalex=1, scaley=1,
+                   font.cex=1,
                    
                    new=TRUE)
 {
@@ -560,7 +663,9 @@ plotMM <- function(base,
   
   #diag(base) <- 
   ##this should plot be the background only in light grey.
-  gplot(base, coord = coords, edge.lwd = 2.8, edge.col = "grey", vertex.cex = 1.5, jitter = F,
+  gplot(base, coord = coords, edge.lwd = 2.8, edge.col = "grey",
+        label.cex = .9*sqrt(scalex*scaley)*font.cex, 
+        vertex.cex = 1.5*font.cex, jitter = F,
         vertex.col="grey", new=new,diag=F)
   
   #nodes <- diag(emat)+1
@@ -569,10 +674,11 @@ plotMM <- function(base,
         edge.col=edgecol,
         edge.lty.neg=1,
         label=1:length(nodes),label.col=textcol,
-        label.cex = .9*sqrt(scalex*scaley), label.pos=5,
+        label.cex = .9*sqrt(scalex*scaley)*font.cex, 
+        label.pos=5,
         vertex.col=cols,
         vertex.enclose=T,
-        vertex.cex=1.6,
+        vertex.cex=1.5*font.cex,
         vertex.border=border,new=F,
         jitter=F)
   
@@ -580,7 +686,7 @@ plotMM <- function(base,
 }
 
 
-plotWeights <- function(weights,frame, output,main="")
+plotWeights <- function(weights,frame, output,main="",cex=1,...)
 {
   nexem <- dim(weights)[3]
   for(exemplar in 1:nexem)
@@ -597,18 +703,20 @@ plotWeights <- function(weights,frame, output,main="")
     
     if(output[node])
     {
-     matplot(wts[,node,],type="p",pch=1,col="black",main=paste(main,"\nOutput node:",node))
+     matplot(wts[,node,],type="p",pch=1,col="black",main=paste(main,"\nOutput node:",node),cex=cex,
+             ylab="Parameter value",xlab="Parameter",...)
      for(exemplar in 1:nexem)
       {
-       points(1:nrow(wts), wts[,node,exemplar],col=c("grey","black")[1+frame[,output]],pch=16,cex=.8,type="o")
+        points(1:nrow(wts), wts[,node,exemplar],col=c("grey","black")[1+frame[,output]],pch=16,cex=cex,type="o",...)
      }
+      matplot(wts[,node,],type="p",pch=1,col="black",add=T,cex=cex,...)
   }
  }
 }
 
 generateData <- function(reps=1000,aweights,avals,iter,input,noise)
 {
-  reps <- 1000 ##should have more reps than nodes!
+  #reps <- 1000 ##should have more reps than nodes!
   numnodes <- length(avals)
   
   
@@ -634,4 +742,14 @@ generateData <- function(reps=1000,aweights,avals,iter,input,noise)
   return(data)
 }
 
+##returns the max vote, or randomly chooses amongst the best votes.
+vote <- function(votes)
+{
+  tally <- table(votes)
+  maxvote <-max(tally)
+  tally[tally<maxvote] <- 0
+  print(tally)
+  sample(names(tally),size=1,p=tally)
+  
+}
 

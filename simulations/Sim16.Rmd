@@ -90,7 +90,7 @@ exemplarsToUpdate <- 5
 simreps <- 2500
 trial <- 1
 
-fitthresh <- .7   ##How much better does a fit need to be to add a node?
+fitthresh <- .9   ##How much better does a fit need to be to add a node?
 stmSize <- 5
 stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 

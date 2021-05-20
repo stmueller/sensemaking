@@ -163,7 +163,7 @@ for(block in 1:numblocks)
   hweights2 <- hweights
   hweights3 <- hweights
 
-  out <- pureLearn(steps=steps,hweights,hframe,alpha,
+  out <- pureLearn(hweights,hframe,alpha,
                    exemplarsToUpdate,numExemplars,
                    houtput, input,
                    tmpdata,    stm)

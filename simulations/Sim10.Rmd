@@ -43,7 +43,7 @@ if(exists("seed"))
 } else {
     seed <- 100
 }
-#seed <- 136
+seed <- 136
 cat("Using random seed: ",seed,"\n")
 set.seed(seed)
 
@@ -125,7 +125,7 @@ stm <- matrix(NA,nrow=stmSize,ncol=numnodes)
 
 ##implement learning here.
 alpha <- .25 #learning rate.
-decay <- .9995
+decay <- 1.0
 maxback <- 10  #how deeply to simulate causal model/back-propogate.
 
 
@@ -252,12 +252,12 @@ for(block in 1:numblocks)
                    stm,    stm)
   
   
-  par(mfrow=c(3,3),mar=c(2,3,3,0))
+  par(mfrow=c(2,3),mar=c(2,3,3,0))
   plotWeights(learn1$hweights,hframe,output,main="Original")
-  plotWeights(learn2$hweights,hframe2,output,main="Add good")
-  plotWeights(learn3$hweights,hframe3,output,main="Add bad")
+  plotWeights(learn2$hweights,hframe2,output,main="Add Node 1 (good)")
+  plotWeights(learn3$hweights,hframe3,output,main="Add Node 4 (bad)")
   
-  rng <- range((c(0,out$learningerror,learn2$learningerror,learn3$learningerror)))
+  rng <- range((c(0,out$learningerror,learn2$learningerror,learn3$learningerror)),na.rm=T)
   
   matplot(t((learn1$learningerror[,output,])),type="l",col="grey50",lty=1,ylim=rng,main="Output node error")
   abline(0,0)
@@ -279,9 +279,9 @@ for(block in 1:numblocks)
    
 
   ##this is the same scheme used within evaluatementalmodel:
-    keep1  <- keepPredictor(learn1$hweights,stm,output,thresh=.15)
-    keep2  <- keepPredictor(learn2$hweights,stm,output,thresh=.15)
-    keep3  <- keepPredictor(learn3$hweights,stm,output,thresh=.15)
+   keep1  <- keepPredictor(learn1$hweights,stm,output,thresh=.15)
+   keep2  <- keepPredictor(learn2$hweights,stm,output,thresh=.15)
+   keep3  <- keepPredictor(learn3$hweights,stm,output,thresh=.15)
     
   
     
@@ -291,28 +291,36 @@ for(block in 1:numblocks)
   ##1. alternative with more nodes will certainly be better.
   ##2. Even if the new node is irrelevant, it may take on values that move away from 0,
   ##  just because things are getting better.
-  
+  par(mfrow=c(1,1))
   image(1:3,1:20,rbind(keep1,keep2,keep3),col=c("black","white"),axes=F,xlab="Exemplar",ylab="Feature",
         main="Keep feature")
   segments(0,0:21+.5,4,0:21+.5,col="grey")
   segments(0:3+.5,0,0:3+.5,20,col="grey")
+  par(mfrow=c(1,2))
 
-  barplot(c(fit1,fit2,fit3))
-  barplot(c(fit2/fit1,fit3/fit1),ylim=c(0,max(1,fit2/fit1,fit3/fit1)))
+  barplot(c(fit1,fit2,fit3),names=c("Current\nframe","Add Node 1 \n(good)","Add Node 4\n(bad)"),main="Mean error ")
+          
+  barplot(c(fit2/fit1,fit3/fit1),ylim=c(0,max(1,fit2/fit1,fit3/fit1)),
+          names=c("Current/Good node", "Current/bad node"),       
+          main="Mean error ratio")
   abline(1,0)
   abline(.5,0)
   
   
   
   
-  if(fit2/fit1<.5 & keep1)
+  if(fit2/fit1<.5 )
   {
-    title("Add node 1")
+    title(sub="(Node 1 Added)")
+  }else{
+      title(sub="(Node not 1 Added)")
   }
   
-  if(fit3/fit1<.5&keep2)
+  if(fit3/fit1<.5)
   {
-    title("Add node 4")
+    title(sub="(Node 4 added)")
+  } else {
+    title(sub="(Node 4 not added)")
   }
   
   
@@ -338,8 +346,8 @@ par(mfrow=c(1,3),mar=c(3,4,2,0))
 image(as.matrix(hweights[,numnodes,]),col=brewer.pal(11,"RdYlGn"))
   plotWeights(hweights,hframe,output,main=paste("Trial:",trial))
 
- lerr <- apply(abs(learningerror),3, mean)
- plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
+ lerr <- apply(abs(learningerror),3, function(x){ mean(x,na.rm=T)})
+  plot(lerr,col="grey30",main="Error over time",ylab="Mean absolute error",xlab="Learning round")
   points(lowess(lerr,f=.2),lty=1,type='l',lwd=4,col="red")
 
 ```

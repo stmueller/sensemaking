@@ -111,7 +111,7 @@ ideal <- lm(out~x1+x2+x3+x4+ 0,data=df)
 
 ## The main simulation/learning phase.
 ##Use this for animation package:
-#```{r,fig.width=8, fig.height=6, fig.show='animate', fig.path="../sim-output/img/"}
+#```{r,fig.width=8, fig.height=6, fig.show='animate',fig.path="../sim-output/img/"}
 ##Use this one for non-animation
 ```{r fig.width=8,fig.height=6,echo=FALSE,message=FALSE,warning=FALSE}
 
